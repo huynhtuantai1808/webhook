@@ -102,69 +102,41 @@ def extract_alert_info_legacy(text):
     return data
 
 def format_slack_message(alerts):
-    """Tạo message format đẹp cho Slack"""
-    attachments = []
+    """Tạo message format đẹp cho Slack - Version đơn giản"""
+    messages = []
     
     for alert in alerts:
         status = alert['status'].lower()
         severity = alert['severity'].lower()
         
-        # Chọn emoji và màu
+        # Chọn emoji
         emoji = ALERT_EMOJI.get(status, ALERT_EMOJI.get(severity, '🔔'))
-        color = ALERT_COLORS.get(status, ALERT_COLORS.get(severity, '#808080'))
         
         # Tạo timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # Tạo fields
-        fields = [
-            {
-                "title": "Status",
-                "value": f"{emoji} {alert['status'].upper()}",
-                "short": True
-            },
-            {
-                "title": "Severity",
-                "value": alert['severity'].upper(),
-                "short": True
-            },
-            {
-                "title": "Instance",
-                "value": alert['instance'],
-                "short": True
-            },
-            {
-                "title": "Job",
-                "value": alert['job'],
-                "short": True
-            },
-            {
-                "title": "Value",
-                "value": alert['value'],
-                "short": True
-            },
-            {
-                "title": "Time",
-                "value": timestamp,
-                "short": True
-            }
-        ]
-        
-        attachment = {
-            "color": color,
-            "title": f"{emoji} {alert['title']}",
-            "text": f"*Description:* {alert['description']}\n*Summary:* {alert['summary']}",
-            "fields": fields,
-            "footer": "Grafana Alert System",
-            "ts": int(datetime.now().timestamp())
-        }
-        
-        attachments.append(attachment)
+        # Tạo message đơn giản
+        message = f"""
+{emoji} *{alert['title']}*
+
+*Status:* {alert['status'].upper()}
+*Severity:* {alert['severity'].upper()}
+*Instance:* {alert['instance']}
+*Job:* {alert['job']}
+*Value:* {alert['value']}
+*Time:* {timestamp}
+
+*Description:* {alert['description']}
+*Summary:* {alert['summary']}
+
+{'─' * 30}
+"""
+        messages.append(message)
     
-    return {
-        "text": f"🚨 *Grafana Alert Notification* ({len(alerts)} alert{'s' if len(alerts) > 1 else ''})",
-        "attachments": attachments
-    }
+    final_message = f"🚨 *Grafana Alert Notification* ({len(alerts)} alert{'s' if len(alerts) > 1 else ''})\n"
+    final_message += "\n".join(messages)
+    
+    return {"text": final_message}
 
 def format_telegram_message(alerts):
     """Tạo message format đẹp cho Telegram"""
@@ -206,15 +178,29 @@ def send_to_slack(alerts):
     """Gửi thông báo lên Slack với format đẹp"""
     try:
         payload = format_slack_message(alerts)
-        response = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
+        
+        # Log payload để debug
+        logger.info(f"Sending to Slack: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(
+            SLACK_WEBHOOK_URL, 
+            json=payload, 
+            timeout=10,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        logger.info(f"Slack response status: {response.status_code}")
+        logger.info(f"Slack response text: {response.text}")
         
         if response.status_code == 200:
             logger.info("Alert sent to Slack successfully")
         else:
-            logger.error(f"Failed to send to Slack: {response.status_code}")
+            logger.error(f"Failed to send to Slack: {response.status_code} - {response.text}")
             
     except Exception as e:
         logger.error(f"Error sending to Slack: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 def send_to_telegram(alerts):
     """Gửi thông báo lên Telegram với format đẹp"""
@@ -288,6 +274,38 @@ def test_endpoint():
     """Endpoint để test webhook"""
     send_test_alert()
     return jsonify({"status": "Test alert sent"}), 200
+
+@app.route('/test-slack', methods=['GET'])
+def test_slack_only():
+    """Test chỉ Slack để debug"""
+    try:
+        # Test với payload đơn giản nhất
+        simple_payload = {"text": "🚨 Test message from webhook"}
+        
+        logger.info(f"Testing simple payload: {json.dumps(simple_payload)}")
+        
+        response = requests.post(
+            SLACK_WEBHOOK_URL, 
+            json=simple_payload, 
+            timeout=10,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        logger.info(f"Response status: {response.status_code}")
+        logger.info(f"Response text: {response.text}")
+        
+        if response.status_code == 200:
+            return jsonify({"status": "Slack test successful", "response": response.text}), 200
+        else:
+            return jsonify({
+                "status": "Slack test failed", 
+                "status_code": response.status_code,
+                "response": response.text
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Error in Slack test: {str(e)}")
+        return jsonify({"status": "Error", "message": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
