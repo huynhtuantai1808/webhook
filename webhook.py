@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Cấu hình webhook
-SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
+SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
 TELEGRAM_BOT_TOKEN = '5003750423:AAGwHyrM69uj5uNEzMDgoq_M2i9y1-ZkXTs'
 TELEGRAM_CHAT_ID = '-608003539'
 
