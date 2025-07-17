@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
-SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
+SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
 TELEGRAM_BOT_TOKEN = '5003750423:AAGwHyrM69uj5uNEzMDgoq_M2i9y1-ZkXTs'
 TELEGRAM_CHAT_ID = '-608003539'
 
