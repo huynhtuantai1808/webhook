@@ -71,9 +71,14 @@ def extract_alert_info(data):
 
             alert_info['value'] = format_value(raw_value, item_lower)
 
+            if 'datasourceerror' in alert_info['summary'].lower() or 'datasourceerror' in alert_info['description'].lower():
+                continue
+
             alerts.append(alert_info)
     elif 'message' in data:
-        alerts.append(extract_alert_info_legacy(data['message']))
+        result = extract_alert_info_legacy(data['message'])
+        if result:
+            alerts.append(result)
     return alerts
 
 def extract_alert_info_legacy(text):
@@ -113,7 +118,43 @@ def extract_alert_info_legacy(text):
             key, value = key.strip(), value.strip()
             data[key] = value
 
+    if 'datasourceerror' in data['summary'].lower() or 'datasourceerror' in data['description'].lower():
+        return None
+
     return data
+
+def send_to_telegram(alerts):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("Telegram config missing, skipping...")
+        return
+    try:
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": format_telegram_message(alerts),
+            "parse_mode": "Markdown",
+            "disable_web_page_preview": True
+        }
+        r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json=payload, timeout=10)
+        if r.status_code == 200:
+            logger.info("✅ Telegram alert sent.")
+        else:
+            logger.error(f"❌ Telegram failed: {r.status_code} - {r.text}")
+    except Exception as e:
+        logger.exception(f"Error sending to Telegram: {e}")
+
+def send_to_slack(alerts):
+    if not SLACK_WEBHOOK_URL:
+        logger.warning("Slack webhook not set, skipping...")
+        return
+    try:
+        payload = format_slack_message(alerts)
+        r = requests.post(SLACK_WEBHOOK_URL, json=payload, headers={'Content-Type': 'application/json'}, timeout=10)
+        if r.status_code == 200:
+            logger.info("✅ Slack alert sent.")
+        else:
+            logger.error(f"❌ Slack failed: {r.status_code} - {r.text}")
+    except Exception as e:
+        logger.exception(f"Error sending to Slack: {e}")
 
 def format_telegram_message(alerts):
     messages = []
@@ -172,39 +213,6 @@ def format_slack_message(alerts):
         messages.append(message)
     return {"text": f"🚨 *System Alert Notification* ({len(alerts)} alert{'s' if len(alerts) > 1 else ''})\n" + "\n".join(messages)}
 
-def send_to_telegram(alerts):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("Telegram config missing, skipping...")
-        return
-    try:
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": format_telegram_message(alerts),
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": True
-        }
-        r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json=payload, timeout=10)
-        if r.status_code == 200:
-            logger.info("✅ Telegram alert sent.")
-        else:
-            logger.error(f"❌ Telegram failed: {r.status_code} - {r.text}")
-    except Exception as e:
-        logger.exception(f"Error sending to Telegram: {e}")
-
-def send_to_slack(alerts):
-    if not SLACK_WEBHOOK_URL:
-        logger.warning("Slack webhook not set, skipping...")
-        return
-    try:
-        payload = format_slack_message(alerts)
-        r = requests.post(SLACK_WEBHOOK_URL, json=payload, headers={'Content-Type': 'application/json'}, timeout=10)
-        if r.status_code == 200:
-            logger.info("✅ Slack alert sent.")
-        else:
-            logger.error(f"❌ Slack failed: {r.status_code} - {r.text}")
-    except Exception as e:
-        logger.exception(f"Error sending to Slack: {e}")
-
 def send_test_alert():
     alert = {
         'title': 'Free Memory Alert',
@@ -222,19 +230,6 @@ def send_test_alert():
     }
     send_to_slack([alert])
     send_to_telegram([alert])
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data received"}), 400
-    logger.info(f"📩 Received: {json.dumps(data, indent=2)}")
-    alerts = extract_alert_info(data)
-    if not alerts:
-        return jsonify({"error": "No alerts parsed"}), 400
-    send_to_slack(alerts)
-    send_to_telegram(alerts)
-    return jsonify({"status": "success", "message": f"Sent {len(alerts)} alerts"}), 200
 
 @app.route('/test', methods=['GET'])
 def test_alert_route():
