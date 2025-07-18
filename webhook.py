@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
-SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL')  # Đặt biến môi trường
+SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
@@ -20,11 +20,29 @@ ALERT_EMOJI = {
     'warning': '⚠️', 'info': 'ℹ️', 'ok': '✅'
 }
 
+def format_value(raw_value, item_lower):
+    try:
+        float_val = float(raw_value)
+        if 'memory' in item_lower:
+            if float_val >= 1e9:
+                return f"{float_val / 1e9:.2f} GB"
+            elif float_val >= 1e6:
+                return f"{float_val / 1e6:.2f} MB"
+            elif float_val >= 1e3:
+                return f"{float_val / 1e3:.2f} KB"
+            else:
+                return f"{float_val:.2f} B"
+        elif 'cpu user time' in item_lower:
+            return f"{float_val:.2f}%"
+        else:
+            return f"{float_val}"
+    except:
+        return raw_value
+
 def extract_alert_info(data):
     alerts = []
     if 'alerts' in data:
         for alert in data['alerts']:
-            # Bỏ qua alert DatasourceNoData
             if alert.get('labels', {}).get('alertname') == 'DatasourceNoData':
                 continue
 
@@ -45,26 +63,13 @@ def extract_alert_info(data):
                 'grafana_folder': alert.get('labels', {}).get('grafana_folder', 'N/A'),
             }
 
-            # Format lại giá trị value nếu có thể
-            raw_value = alert_info['value']
+            raw_value = str(alert_info['value'])
             item_lower = alert_info['item'].lower()
-            try:
-                float_val = float(raw_value)
-                if 'memory' in item_lower:
-                    if float_val >= 1e9:
-                        alert_info['value'] = f"{float_val / 1e9:.2f} GB"
-                    elif float_val >= 1e6:
-                        alert_info['value'] = f"{float_val / 1e6:.2f} MB"
-                    elif float_val >= 1e3:
-                        alert_info['value'] = f"{float_val / 1e3:.2f} KB"
-                    else:
-                        alert_info['value'] = f"{float_val:.2f} B"
-                elif 'cpu user time' in item_lower:
-                    alert_info['value'] = f"{float_val:.2f}%"
-                else:
-                    alert_info['value'] = str(float_val)
-            except:
-                pass
+
+            if raw_value.startswith("B="):
+                raw_value = raw_value.split(",")[0].replace("B=", "").strip()
+
+            alert_info['value'] = format_value(raw_value, item_lower)
 
             alerts.append(alert_info)
     elif 'message' in data:
@@ -82,23 +87,13 @@ def extract_alert_info_legacy(text):
     value_match = re.search(r'Value:\s*(.+?)(?=Labels:|$)', text, re.DOTALL)
     if value_match:
         value_text = value_match.group(1).strip()
-        values = []
-        value_parts = re.findall(r'([A-Z])=([0-9.e+-]+)', value_text)
-        for var, val in value_parts:
-            try:
-                float_val = float(val)
-                if float_val > 1e9:
-                    readable_val = f"{float_val/1e9:.2f}GB"
-                elif float_val > 1e6:
-                    readable_val = f"{float_val/1e6:.2f}MB"
-                elif float_val > 1e3:
-                    readable_val = f"{float_val/1e3:.2f}KB"
-                else:
-                    readable_val = f"{float_val:.2f}"
-                values.append(f"{var}={readable_val}")
-            except:
-                values.append(f"{var}={val}")
-        data['value'] = ", ".join(values) if values else value_text
+        b_match = re.search(r'B=([0-9.eE+-]+)', value_text)
+        item_lower = data['item'].lower()
+        if b_match:
+            raw_value = b_match.group(1)
+            data['value'] = format_value(raw_value, item_lower)
+        else:
+            data['value'] = value_text
 
     labels_section = re.search(r'Labels:\s*(.+?)(?=Annotations:|$)', text, re.DOTALL)
     if labels_section:
@@ -219,7 +214,7 @@ def send_test_alert():
         'job': 'zabbix-server',
         'description': 'RAM usage high',
         'summary': 'Memory over 85%',
-        'value': '14434856960',
+        'value': 'B=1.4449995776e+10, C=1',
         'host': 'localhost',
         'item': 'Available memory',
         'item_key': 'vm.memory.size[available]',
