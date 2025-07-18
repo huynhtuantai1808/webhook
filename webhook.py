@@ -11,9 +11,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
-SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
-TELEGRAM_BOT_TOKEN = '5003750423:AAGwHyrM69uj5uNEzMDgoq_M2i9y1-ZkXTs'
-TELEGRAM_CHAT_ID = '-608003539'
+SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL')  # Đặt biến môi trường
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 ALERT_EMOJI = {
     'firing': '🚨', 'resolved': '✅', 'critical': '💥',
@@ -24,6 +24,10 @@ def extract_alert_info(data):
     alerts = []
     if 'alerts' in data:
         for alert in data['alerts']:
+            # Bỏ qua alert DatasourceNoData
+            if alert.get('labels', {}).get('alertname') == 'DatasourceNoData':
+                continue
+
             alert_info = {
                 'title': alert.get('labels', {}).get('alertname', 'Unknown Alert'),
                 'status': alert.get('status', 'unknown'),
@@ -40,6 +44,28 @@ def extract_alert_info(data):
                 'item_key': alert.get('labels', {}).get('item_key', 'N/A'),
                 'grafana_folder': alert.get('labels', {}).get('grafana_folder', 'N/A'),
             }
+
+            # Format lại giá trị value nếu có thể
+            raw_value = alert_info['value']
+            item_lower = alert_info['item'].lower()
+            try:
+                float_val = float(raw_value)
+                if 'memory' in item_lower:
+                    if float_val >= 1e9:
+                        alert_info['value'] = f"{float_val / 1e9:.2f} GB"
+                    elif float_val >= 1e6:
+                        alert_info['value'] = f"{float_val / 1e6:.2f} MB"
+                    elif float_val >= 1e3:
+                        alert_info['value'] = f"{float_val / 1e3:.2f} KB"
+                    else:
+                        alert_info['value'] = f"{float_val:.2f} B"
+                elif 'cpu user time' in item_lower:
+                    alert_info['value'] = f"{float_val:.2f}%"
+                else:
+                    alert_info['value'] = str(float_val)
+            except:
+                pass
+
             alerts.append(alert_info)
     elif 'message' in data:
         alerts.append(extract_alert_info_legacy(data['message']))
@@ -193,7 +219,7 @@ def send_test_alert():
         'job': 'zabbix-server',
         'description': 'RAM usage high',
         'summary': 'Memory over 85%',
-        'value': 'B=14.4GB, C=1',
+        'value': '14434856960',
         'host': 'localhost',
         'item': 'Available memory',
         'item_key': 'vm.memory.size[available]',
