@@ -231,6 +231,29 @@ def send_test_alert():
     send_to_slack([alert])
     send_to_telegram([alert])
 
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        data = request.get_json(force=True, silent=True)
+        if not data:
+            raw = request.data.decode(errors='replace')  # log raw body khi lỗi
+            logger.warning(f"❌ Invalid JSON payload. Raw body:\n{raw}")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        logger.info(f"📩 Received: {json.dumps(data, indent=2)}")
+        alerts = extract_alert_info(data)
+        if not alerts:
+            logger.info("🔕 No valid alerts after filtering.")
+            return jsonify({"error": "No alerts parsed"}), 400
+
+        send_to_slack(alerts)
+        send_to_telegram(alerts)
+        return jsonify({"status": "success", "message": f"Sent {len(alerts)} alerts"}), 200
+
+    except Exception as e:
+        logger.exception("🔥 Exception in /webhook:")
+        return jsonify({"error": "Internal server error"}), 500
+
 @app.route('/test', methods=['GET'])
 def test_alert_route():
     send_test_alert()
